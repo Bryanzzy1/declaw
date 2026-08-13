@@ -192,7 +192,7 @@ def gemini_rewrite(prompt: str) -> str:
             "error: --backend gemini needs GEMINI_API_KEY in your environment. "
             "Set it yourself; declaw never takes a key on the command line."
         )
-    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    model = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
         f":generateContent?key={key}"
