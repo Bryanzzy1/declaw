@@ -1,66 +1,44 @@
 # declaw
 
-Strip AI provenance from text you own, for privacy and hygiene. Text only, stdlib Python, no dependencies.
+Remove AI provenance from text you own. Stdlib Python, no dependencies, text only.
 
-Two marks ride in AI text, and they need two different tools:
+AI text carries two marks, and they need different tools:
 
-| Layer | Mark | How declaw handles it |
+| Layer | Mark | Fix |
 | --- | --- | --- |
-| **A** | Invisible Unicode (zero-width, variation selectors, tag chars, bidi, exotic spaces) | Deterministic scrub, zero quality cost |
-| **B** | Statistical token-choice watermark (green-list logit bias, SynthID-Text and Kirchenbauer family) | Rewrite through a peer model, then pick the most token-diverged result |
+| **A** | Invisible Unicode (zero-width, variation selectors, tag chars, bidi) | Deterministic scrub |
+| **B** | Statistical token watermark (SynthID-Text, Kirchenbauer family) | Rewrite through a peer model |
 
-Layer A is a clean delete. Layer B cannot be deleted, the mark lives in word choice, so the only real removal is a full rewrite by a model that does not share the secret key. declaw does the deterministic part itself and drives the rewrite part through Gemini.
+Layer A is a clean delete. Layer B lives in word choice, so the only real removal is a full rewrite by a model that does not share the key. declaw scrubs A itself and drives B through Gemini.
 
-## Why a rewrite, and why a strong one
-
-The watermark biases which tokens the model picks. A detector counts how many "green" tokens appear and runs a z-test. Editing a few words leaves the signal. Re-generating the text through a different strong model re-picks every token, so the green rate falls back to chance and the z-test fails. A weak local model removes less and costs more quality, so use a peer model like Gemini. See the research: [Watermark Stealing](https://watermark-stealing.org/), [Black-Box Detection of Watermarks](https://github.com/eth-sri/watermark-detection), and the origin paper Kirchenbauer et al. (arXiv:2301.10226).
-
-## Install
+## Setup
 
 ```bash
-git clone https://github.com/Bryanzzy1/declaw
-cd declaw
-python declaw.py selftest   # should print: selftest ok
+git clone https://github.com/Bryanzzy1/declaw && cd declaw
+python declaw.py selftest        # prints: selftest ok
 ```
 
-Optional, for the automated rewrite path: copy `.env.example` to `.env` and paste your [Gemini API key](https://aistudio.google.com/apikey). The key is read from `.env` or the environment only, never from the command line, and `.env` is gitignored.
+For the automated rewrite: copy `.env.example` to `.env` and paste a [Gemini key](https://aistudio.google.com/apikey). The key is read from `.env` only and stays gitignored.
 
 ## Use
 
 ```bash
-# Layer A: strip invisible characters
-python declaw.py scrub draft.md -o draft.clean.md
-python declaw.py inspect draft.md          # just report what is hidden
-
-# Layer B: get the rewrite prompt to paste into Gemini
-python declaw.py prompt draft.md --strength paraphrase
-
-# Pick the best of several Gemini rewrites
-python declaw.py score draft.md cand1.txt cand2.txt -o final.txt
+python declaw.py scrub draft.md -o clean.md     # Layer A
+python declaw.py prompt draft.md                # Layer B prompt for Gemini
+python declaw.py score draft.md a.txt b.txt     # pick the most reworded rewrite
 ```
 
-### Browser loop (claude.ai web + Gemini web)
-
-The web apps cannot run scripts, so declaw uses the clipboard:
+Browser loop (claude.ai + Gemini, clipboard driven):
 
 ```bash
-# 1. copy your Claude output, then:
-python declaw.py web            # scrubs, puts a Gemini prompt on your clipboard
-                                # (or rewrites directly if GEMINI_API_KEY is set)
-# 2. paste into Gemini, copy its answer, then:
-python declaw.py web --finish   # scrubs the answer, scores it, copies clean text back
+python declaw.py web            # copy Claude output first; scrubs, then rewrites (key) or hands you a prompt
+python declaw.py web --finish   # copy Gemini's answer first; scrubs, scores, copies clean text back
 ```
 
-## Honest limits
+## Limits
 
-- No tool can certify a vendor's secret detector will fail after removal. This is best-effort.
-- Rewrite all of the text, not part. Untouched spans keep their mark.
-- Files, images, and their C2PA / EXIF metadata are out of scope. Text only.
+Best-effort. No tool can prove a vendor's private detector fails. Rewrite all of the text, not part. No files or metadata.
 
-## Credit
+Design follows [watermarks-remover](https://github.com/guillaumemeyer/watermarks-remover). Background: [Watermark Stealing](https://watermark-stealing.org/), Kirchenbauer et al. ([arXiv:2301.10226](https://arxiv.org/abs/2301.10226)).
 
-Layer split and the rewrite-plus-score approach follow the design of [guillaumemeyer/watermarks-remover](https://github.com/guillaumemeyer/watermarks-remover). declaw is an independent, minimal, text-only take.
-
-## License
-
-MIT
+MIT.
