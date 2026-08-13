@@ -13,7 +13,7 @@ Take text the user owns and return it human-sounding and free of AI provenance m
 - The user says "declaw" or "clean this."
 
 ## The pipeline (run in order)
-1. **Style.** Invoke the `humanize-ai-writing` skill first so the prose reads human. Skip only if the text is already the user's own voice.
+1. **Style.** Invoke the `humanizer` skill first so the prose reads human. Skip only if the text is already the user's own voice.
 2. **Layer A, deterministic.** Run `python declaw.py scrub` on the draft. Removes invisible Unicode: zero-width, variation selectors, tag chars, bidi, exotic spaces. Zero quality cost. Do this even on your own drafts, it also cleans anything a later model adds.
 3. **Layer B, statistical.** The token-choice watermark only comes out with a real rewrite through a model that does not share the key.
    - If `GEMINI_API_KEY` is set, run `python declaw.py web --backend gemini` (or feed the prompt from `declaw prompt` to Gemini) to rewrite automatically.
