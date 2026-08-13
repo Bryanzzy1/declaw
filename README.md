@@ -9,7 +9,7 @@ AI text carries two marks, and they need different tools:
 | **A** | Invisible Unicode (zero-width, variation selectors, tag chars, bidi) | Deterministic scrub |
 | **B** | Statistical token watermark (SynthID-Text, Kirchenbauer family) | Rewrite through a peer model |
 
-Layer A is a clean delete. Layer B lives in word choice, so the only real removal is a full rewrite by a model that does not share the key. declaw scrubs A itself and drives B through Gemini.
+Layer A you just delete. Layer B is baked in as the text is generated, so nothing short of a full rewrite by another model gets it out. declaw handles A itself and runs B through Gemini.
 
 ## Setup
 
