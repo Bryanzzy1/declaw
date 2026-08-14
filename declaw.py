@@ -23,6 +23,7 @@ stdlib only. Gemini backend is optional and off by default.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -49,7 +50,9 @@ _REMOVE |= set(range(0xE0000, 0xE0080))        # Unicode tag chars (hidden paylo
 _KEEP_CONTROLS = {"\n", "\r", "\t"}
 
 
-def clean_text(text: str, *, nfkc: bool = False, normalize_spaces: bool = True):
+def clean_text(
+    text: str, *, nfkc: bool = False, normalize_spaces: bool = True
+) -> tuple[str, dict[str, int]]:
     """Return (cleaned_text, stats). Deletes invisibles, normalizes odd spaces."""
     out: list[str] = []
     removed = 0
@@ -197,7 +200,8 @@ def gemini_rewrite(prompt: str) -> str:
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
         f":generateContent?key={key}"
     )
-    body = ('{"contents":[{"parts":[{"text":%s}]}]}' % _json_str(prompt)).encode("utf-8")
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=body, headers={"Content-Type": "application/json"}, method="POST"
     )
@@ -206,15 +210,7 @@ def gemini_rewrite(prompt: str) -> str:
     return _extract_gemini_text(raw)
 
 
-def _json_str(s: str) -> str:
-    import json
-
-    return json.dumps(s)
-
-
 def _extract_gemini_text(raw: str) -> str:
-    import json
-
     data = json.loads(raw)
     try:
         parts = data["candidates"][0]["content"]["parts"]
@@ -266,7 +262,7 @@ def write_output(text: str, out: str | None) -> None:
         sys.stdout.write(text)
 
 
-def eprint(*a):
+def eprint(*a) -> None:
     print(*a, file=sys.stderr)
 
 
