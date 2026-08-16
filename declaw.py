@@ -294,11 +294,21 @@ def gemini_rewrite(prompt: str, *, retries: int = 3) -> str:
 
 def _extract_gemini_text(raw: str) -> str:
     data = json.loads(raw)
-    try:
-        parts = data["candidates"][0]["content"]["parts"]
-        return "".join(p.get("text", "") for p in parts).strip()
-    except (KeyError, IndexError) as e:
-        raise SystemExit(f"error: unexpected Gemini response: {e}\n{raw[:400]}")
+    # A safety filter can reject the prompt outright: no candidates, just a
+    # blockReason. Surface that plainly instead of an index error.
+    block = (data.get("promptFeedback") or {}).get("blockReason")
+    if block:
+        raise SystemExit(f"error: Gemini blocked the prompt (blockReason={block}). Try --strength humanize.")
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise SystemExit(f"error: Gemini returned no candidates.\n{raw[:400]}")
+    parts = (candidates[0].get("content") or {}).get("parts") or []
+    text = "".join(p.get("text", "") for p in parts).strip()
+    if not text:
+        # A candidate with no text usually carries a finishReason (SAFETY, MAX_TOKENS).
+        reason = candidates[0].get("finishReason", "unknown")
+        raise SystemExit(f"error: Gemini returned an empty rewrite (finishReason={reason}).")
+    return text
 
 
 # --------------------------------------------------------------------------- #
