@@ -188,22 +188,31 @@ def select_candidate(original: str, candidates: list[str]) -> tuple[int, list[fl
 # Optional Gemini backend (off by default; key read from env only)
 # --------------------------------------------------------------------------- #
 
-def gemini_rewrite(prompt: str) -> str:
+GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+
+def _gemini_key() -> str:
     key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not key:
         raise SystemExit(
             "error: --backend gemini needs GEMINI_API_KEY in your environment. "
             "Set it yourself; declaw never takes a key on the command line."
         )
+    return key
+
+
+def gemini_rewrite(prompt: str) -> str:
+    key = _gemini_key()
     model = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-        f":generateContent?key={key}"
-    )
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     body = json.dumps(payload).encode("utf-8")
+    # Auth via the x-goog-api-key header, not a ?key= query param: the key never
+    # lands in the URL, so proxies and access logs cannot capture it.
     req = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+        GEMINI_ENDPOINT.format(model=model),
+        data=body,
+        headers={"Content-Type": "application/json", "x-goog-api-key": key},
+        method="POST",
     )
     with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 (https only)
         raw = resp.read().decode("utf-8")
