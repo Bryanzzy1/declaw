@@ -18,7 +18,9 @@ git clone https://github.com/Bryanzzy1/declaw && cd declaw
 python declaw.py selftest        # should print: selftest ok
 ```
 
-Want the automated rewrite? Copy `.env.example` to `.env` and drop in a [Gemini key](https://aistudio.google.com/apikey). declaw reads it from `.env` only, and `.env` stays out of git.
+Want the automated rewrite? Copy `.env.example` to `.env` and drop in a [Gemini key](https://aistudio.google.com/apikey). declaw reads it from `.env` only, and `.env` stays out of git. The key travels in the `x-goog-api-key` header, never in the URL.
+
+Not sure the key or model is good? Run `python declaw.py doctor`. It reports whether the key is valid and which models are available, so you can tell a rejected key from an overloaded model. When Gemini answers `503` ("high demand"), declaw retries with backoff and falls back across flash models on its own.
 
 ## Use
 

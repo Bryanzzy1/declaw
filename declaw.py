@@ -16,9 +16,13 @@ Subcommands:
   prompt    emit the Gemini rewrite prompt around your text
   score     rank rewrite candidates by lexical divergence, pick the best
   web       clipboard loop for the browser (claude.ai -> Gemini -> clean)
+  doctor    check the Gemini key and which models are available
   selftest  run built-in asserts
 
-stdlib only. Gemini backend is optional and off by default.
+The Gemini backend authenticates with the x-goog-api-key header (the key never
+enters the URL), retries overloaded models (503/429) with backoff, and falls
+back across flash models. stdlib only; the backend is optional and off by
+default.
 """
 from __future__ import annotations
 
