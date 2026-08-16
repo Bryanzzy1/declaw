@@ -243,6 +243,17 @@ def _http_error_message(err: urllib.error.HTTPError) -> tuple[int, str]:
         return err.code, (body[:300] or err.reason or "no error body")
 
 
+def _gemini_error_help(code: int, msg: str) -> str:
+    """A non-retryable failure, phrased with the fix, not just the code."""
+    if code in (400, 401, 403):
+        return (f"error: Gemini rejected the key ({code}): {msg}\n"
+                "Check GEMINI_API_KEY and any key restrictions at aistudio.google.com/apikey.")
+    if code == 404:
+        return (f"error: model not found ({code}): {msg}\n"
+                "Set GEMINI_MODEL or --model to an available one; run `declaw doctor` to list them.")
+    return f"error: Gemini call failed ({code}): {msg}"
+
+
 def _gemini_post(prompt: str, model: str, key: str, timeout: float) -> str:
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     body = json.dumps(payload).encode("utf-8")
@@ -287,7 +298,7 @@ def gemini_rewrite(prompt: str, *, model: str | None = None, retries: int = 3,
                 if code in RETRYABLE_CODES:
                     eprint(f"gemini {model}: {code} after {retries} retries, trying next model")
                     break  # move on to the next model in the chain
-                raise SystemExit(f"error: Gemini call failed ({code}): {msg}")
+                raise SystemExit(_gemini_error_help(code, msg))
     raise SystemExit(
         f"error: every Gemini model is overloaded right now ({last}).\n"
         "Try again later, or run `declaw prompt` and paste into the Gemini web app."
