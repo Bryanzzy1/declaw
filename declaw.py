@@ -29,6 +29,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unicodedata
 import urllib.error
 import urllib.request
@@ -191,6 +192,23 @@ def select_candidate(original: str, candidates: list[str]) -> tuple[int, list[fl
 
 GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
+# Codes worth retrying: rate limit and the transient server-overload family.
+# 503 UNAVAILABLE ("model experiencing high demand") is the one declaw hits most.
+RETRYABLE_CODES = frozenset({429, 500, 503})
+
+
+def _retry_delay(err: urllib.error.HTTPError | None, attempt: int) -> float:
+    """Seconds to wait before the next attempt (0-indexed).
+
+    Honor a numeric Retry-After header when present; otherwise exponential
+    backoff (1, 2, 4, 8 ...) capped at 30s so a busy model does not stall long.
+    """
+    if err is not None and err.headers:
+        after = err.headers.get("Retry-After")
+        if after and after.strip().isdigit():
+            return min(float(after), 30.0)
+    return min(2.0 ** attempt, 30.0)
+
 
 def _gemini_key() -> str:
     key = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -235,15 +253,23 @@ def _gemini_post(prompt: str, model: str, key: str, timeout: float) -> str:
         return resp.read().decode("utf-8")
 
 
-def gemini_rewrite(prompt: str) -> str:
+def gemini_rewrite(prompt: str, *, retries: int = 3) -> str:
     key = _gemini_key()
     model = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
-    try:
-        raw = _gemini_post(prompt, model, key, timeout=120)
-    except urllib.error.HTTPError as err:
-        code, msg = _http_error_message(err)
-        raise SystemExit(f"error: Gemini call failed ({code}): {msg}")
-    return _extract_gemini_text(raw)
+    last = ""
+    for attempt in range(retries + 1):
+        try:
+            return _extract_gemini_text(_gemini_post(prompt, model, key, timeout=120))
+        except urllib.error.HTTPError as err:
+            code, msg = _http_error_message(err)
+            last = f"{code} {msg}"
+            if code in RETRYABLE_CODES and attempt < retries:
+                delay = _retry_delay(err, attempt)
+                eprint(f"gemini: {code} (overloaded), retry {attempt + 1}/{retries} in {delay:.0f}s")
+                time.sleep(delay)
+                continue
+            raise SystemExit(f"error: Gemini call failed ({code}): {msg}")
+    raise SystemExit(f"error: Gemini still failing after {retries} retries: {last}")
 
 
 def _extract_gemini_text(raw: str) -> str:
