@@ -280,7 +280,7 @@ def _model_chain(primary: str | None = None) -> list[str]:
 
 
 def gemini_rewrite(prompt: str, *, model: str | None = None, retries: int = 3,
-                   timeout: float = 120) -> str:
+                   timeout: float = 60) -> str:
     key = _gemini_key()
     last = ""
     for model in _model_chain(model):
@@ -597,7 +597,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="auto (gemini if GEMINI_API_KEY set, else print), print, or gemini")
     w.add_argument("--model", default=None, help="Gemini model (default gemini-flash-latest or $GEMINI_MODEL)")
     w.add_argument("--retries", type=int, default=3, help="retries per model on overload (default 3)")
-    w.add_argument("--timeout", type=float, default=120, help="per-request timeout seconds (default 120)")
+    w.add_argument("--timeout", type=float, default=60, help="per-request timeout seconds (default 60)")
     w.set_defaults(func=cmd_web)
 
     sub.add_parser("doctor", help="check the Gemini key and model availability").set_defaults(func=cmd_doctor)
