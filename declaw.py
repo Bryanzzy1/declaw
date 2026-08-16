@@ -497,6 +497,19 @@ def cmd_web(args) -> int:
     return 0
 
 
+def cmd_rewrite(args) -> int:
+    """Headless Layer B: scrub -> Gemini rewrite -> scrub, straight on a file or
+    stdin. The clipboard `web` loop is for the browser; this is for scripts."""
+    scrubbed, _ = clean_text(read_input(args.path))
+    prompt = build_prompt(args.strength, scrubbed)
+    rewrite = gemini_rewrite(prompt, model=args.model, retries=args.retries, timeout=args.timeout)
+    final, _ = clean_text(rewrite)
+    div = lexical_divergence(scrubbed, final)
+    write_output(final, args.output)
+    eprint(f"divergence={div:.3f} " + ("(strong)" if div > 0.6 else "(weak, try --strength humanize)"))
+    return 0
+
+
 def cmd_doctor(_args) -> int:
     """Diagnose the Gemini backend: is the key set, valid, and is a usable model
     available. Separates 'bad key' from 'model overloaded' so you stop guessing."""
@@ -603,6 +616,15 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--retries", type=int, default=3, help="retries per model on overload (default 3)")
     w.add_argument("--timeout", type=float, default=60, help="per-request timeout seconds (default 60)")
     w.set_defaults(func=cmd_web)
+
+    rw = sub.add_parser("rewrite", help="headless Layer B: scrub + Gemini rewrite a file/stdin")
+    rw.add_argument("path", nargs="?", default="-")
+    rw.add_argument("-o", "--output")
+    rw.add_argument("--strength", choices=list(PROMPTS), default="paraphrase")
+    rw.add_argument("--model", default=None, help="Gemini model (default gemini-flash-latest or $GEMINI_MODEL)")
+    rw.add_argument("--retries", type=int, default=3, help="retries per model on overload (default 3)")
+    rw.add_argument("--timeout", type=float, default=60, help="per-request timeout seconds (default 60)")
+    rw.set_defaults(func=cmd_rewrite)
 
     sub.add_parser("doctor", help="check the Gemini key and model availability").set_defaults(func=cmd_doctor)
     sub.add_parser("selftest", help="run built-in asserts").set_defaults(func=cmd_selftest)
