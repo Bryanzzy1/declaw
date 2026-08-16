@@ -30,6 +30,7 @@ import subprocess
 import sys
 import tempfile
 import unicodedata
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -201,9 +202,25 @@ def _gemini_key() -> str:
     return key
 
 
-def gemini_rewrite(prompt: str) -> str:
-    key = _gemini_key()
-    model = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+def _http_error_message(err: urllib.error.HTTPError) -> tuple[int, str]:
+    """Pull (code, human message) out of a Gemini HTTPError.
+
+    Google returns a JSON body like {"error":{"code":503,"message":"...",
+    "status":"UNAVAILABLE"}}. Reading it turns an opaque traceback into the
+    reason the caller actually needs.
+    """
+    body = ""
+    try:
+        body = err.read().decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 - body is best-effort context only
+        pass
+    try:
+        return err.code, str(json.loads(body)["error"]["message"])
+    except Exception:  # noqa: BLE001 - fall back to the raw snippet
+        return err.code, (body[:300] or err.reason or "no error body")
+
+
+def _gemini_post(prompt: str, model: str, key: str, timeout: float) -> str:
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     body = json.dumps(payload).encode("utf-8")
     # Auth via the x-goog-api-key header, not a ?key= query param: the key never
@@ -214,8 +231,18 @@ def gemini_rewrite(prompt: str) -> str:
         headers={"Content-Type": "application/json", "x-goog-api-key": key},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 (https only)
-        raw = resp.read().decode("utf-8")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (https only)
+        return resp.read().decode("utf-8")
+
+
+def gemini_rewrite(prompt: str) -> str:
+    key = _gemini_key()
+    model = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+    try:
+        raw = _gemini_post(prompt, model, key, timeout=120)
+    except urllib.error.HTTPError as err:
+        code, msg = _http_error_message(err)
+        raise SystemExit(f"error: Gemini call failed ({code}): {msg}")
     return _extract_gemini_text(raw)
 
 
