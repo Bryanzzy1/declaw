@@ -294,6 +294,22 @@ def gemini_rewrite(prompt: str, *, model: str | None = None, retries: int = 3,
     )
 
 
+def gemini_list_models(key: str, timeout: float = 30) -> list[str]:
+    """Available model ids for this key (bare names, no 'models/' prefix).
+
+    A successful call is also the cheapest proof the key itself is valid, which
+    is what `doctor` needs to separate a bad key from an overloaded model.
+    """
+    req = urllib.request.Request(
+        "https://generativelanguage.googleapis.com/v1beta/models",
+        headers={"x-goog-api-key": key},
+        method="GET",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (https only)
+        data = json.loads(resp.read().decode("utf-8"))
+    return [m["name"].removeprefix("models/") for m in data.get("models", [])]
+
+
 def _extract_gemini_text(raw: str) -> str:
     data = json.loads(raw)
     # A safety filter can reject the prompt outright: no candidates, just a
@@ -466,6 +482,36 @@ def cmd_web(args) -> int:
     return 0
 
 
+def cmd_doctor(_args) -> int:
+    """Diagnose the Gemini backend: is the key set, valid, and is a usable model
+    available. Separates 'bad key' from 'model overloaded' so you stop guessing."""
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key:
+        eprint("key: MISSING. Set GEMINI_API_KEY (declaw reads it from env or .env).")
+        return 1
+    eprint(f"key: set ({len(key)} chars, starts {key[:4]}...)")
+    try:
+        available = set(gemini_list_models(key))
+    except urllib.error.HTTPError as err:
+        code, msg = _http_error_message(err)
+        eprint(f"key: REJECTED ({code}): {msg}")
+        eprint("Check GEMINI_API_KEY and any key restrictions at aistudio.google.com/apikey.")
+        return 1
+    except urllib.error.URLError as err:
+        eprint(f"network: cannot reach Gemini ({err.reason}).")
+        return 1
+    eprint(f"key: valid, {len(available)} models available")
+    chain = _model_chain()
+    for m in chain:
+        eprint(f"  model {m}: {'available' if m in available else 'NOT available'}")
+    usable = [m for m in chain if m in available]
+    if not usable:
+        eprint("no configured model is available; set GEMINI_MODEL or --model to one that is.")
+        return 1
+    eprint(f"ok: will use {usable[0]} (then {', '.join(usable[1:]) or 'no fallback'}).")
+    return 0
+
+
 def cmd_selftest(_args) -> int:
     # Layer A removes zero-width + variation selector, keeps real text.
     dirty = "Hel​lo️ wor⁣ld‍"
@@ -525,6 +571,7 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--timeout", type=float, default=120, help="per-request timeout seconds (default 120)")
     w.set_defaults(func=cmd_web)
 
+    sub.add_parser("doctor", help="check the Gemini key and model availability").set_defaults(func=cmd_doctor)
     sub.add_parser("selftest", help="run built-in asserts").set_defaults(func=cmd_selftest)
     return p
 
