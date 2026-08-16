@@ -542,6 +542,24 @@ def cmd_selftest(_args) -> int:
     # selector picks the most diverged candidate
     best, _ = select_candidate(orig, [orig, reworded])
     assert best == 1
+    # backoff: exponential from 1s, capped at 30s; None err = no Retry-After
+    assert [_retry_delay(None, a) for a in (0, 1, 2, 3)] == [1.0, 2.0, 4.0, 8.0]
+    assert _retry_delay(None, 20) == 30.0
+    import types
+    assert _retry_delay(types.SimpleNamespace(headers={"Retry-After": "5"}), 0) == 5.0
+    # model chain: primary first, fallbacks appended, deduped
+    assert _model_chain("gemini-flash-latest")[0] == "gemini-flash-latest"
+    assert _model_chain("gemini-2.5-flash").count("gemini-2.5-flash") == 1
+    # blocked / empty responses raise a clear SystemExit, not an IndexError
+    for raw in ('{"promptFeedback":{"blockReason":"SAFETY"}}', '{"candidates":[]}'):
+        try:
+            _extract_gemini_text(raw)
+            assert False, "expected SystemExit"
+        except SystemExit:
+            pass
+    # non-retryable help names the fix
+    assert "key" in _gemini_error_help(403, "x").lower()
+    assert "model" in _gemini_error_help(404, "x").lower()
     print("selftest ok")
     return 0
 
