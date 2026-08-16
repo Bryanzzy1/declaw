@@ -258,22 +258,24 @@ def _gemini_post(prompt: str, model: str, key: str, timeout: float) -> str:
         return resp.read().decode("utf-8")
 
 
-def _model_chain() -> list[str]:
-    """Primary model (env override or default) then the flash fallbacks, deduped."""
-    chain = [os.environ.get("GEMINI_MODEL", DEFAULT_MODEL)]
+def _model_chain(primary: str | None = None) -> list[str]:
+    """Primary model (explicit arg, else env override, else default) then the
+    flash fallbacks, deduped and order-preserving."""
+    chain = [primary or os.environ.get("GEMINI_MODEL", DEFAULT_MODEL)]
     for m in FALLBACK_MODELS:
         if m not in chain:
             chain.append(m)
     return chain
 
 
-def gemini_rewrite(prompt: str, *, retries: int = 3) -> str:
+def gemini_rewrite(prompt: str, *, model: str | None = None, retries: int = 3,
+                   timeout: float = 120) -> str:
     key = _gemini_key()
     last = ""
-    for model in _model_chain():
+    for model in _model_chain(model):
         for attempt in range(retries + 1):
             try:
-                return _extract_gemini_text(_gemini_post(prompt, model, key, timeout=120))
+                return _extract_gemini_text(_gemini_post(prompt, model, key, timeout=timeout))
             except urllib.error.HTTPError as err:
                 code, msg = _http_error_message(err)
                 last = f"{model}: {code} {msg}"
@@ -436,7 +438,7 @@ def cmd_web(args) -> int:
         if backend == "auto":
             backend = "gemini" if os.environ.get("GEMINI_API_KEY", "").strip() else "print"
         if backend == "gemini":
-            rewrite = gemini_rewrite(prompt)
+            rewrite = gemini_rewrite(prompt, model=args.model, retries=args.retries, timeout=args.timeout)
             final, _ = clean_text(rewrite)
             div = lexical_divergence(cleaned, final)
             clip_set(final)
@@ -518,6 +520,9 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--strength", choices=list(PROMPTS), default="paraphrase")
     w.add_argument("--backend", choices=["auto", "print", "gemini"], default="auto",
                    help="auto (gemini if GEMINI_API_KEY set, else print), print, or gemini")
+    w.add_argument("--model", default=None, help="Gemini model (default gemini-flash-latest or $GEMINI_MODEL)")
+    w.add_argument("--retries", type=int, default=3, help="retries per model on overload (default 3)")
+    w.add_argument("--timeout", type=float, default=120, help="per-request timeout seconds (default 120)")
     w.set_defaults(func=cmd_web)
 
     sub.add_parser("selftest", help="run built-in asserts").set_defaults(func=cmd_selftest)
