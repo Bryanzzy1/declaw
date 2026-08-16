@@ -27,6 +27,7 @@ Not sure the key or model is good? Run `python declaw.py doctor`. It reports whe
 ```bash
 python declaw.py scrub draft.md -o clean.md     # Layer A
 python declaw.py prompt draft.md                # Layer B: a rewrite prompt for Gemini
+python declaw.py rewrite draft.md -o clean.md   # Layer B end to end, no clipboard (needs a key)
 python declaw.py score draft.md a.txt b.txt     # keep the most-reworded rewrite
 ```
 

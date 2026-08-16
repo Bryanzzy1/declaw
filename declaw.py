@@ -14,6 +14,7 @@ Subcommands:
   scrub     Layer A on a file/stdin, writes cleaned text
   inspect   report hidden characters found, change nothing
   prompt    emit the Gemini rewrite prompt around your text
+  rewrite   headless Layer B: scrub + Gemini rewrite a file/stdin
   score     rank rewrite candidates by lexical divergence, pick the best
   web       clipboard loop for the browser (claude.ai -> Gemini -> clean)
   doctor    check the Gemini key and which models are available
