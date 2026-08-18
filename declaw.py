@@ -177,6 +177,87 @@ def decode_variation_bytes(text: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Homoglyph confusables (UTS #39): letters from other scripts that look like ASCII
+# --------------------------------------------------------------------------- #
+
+# Cyrillic and Greek letters that render identically to a Latin letter in common fonts.
+# A word like "pаypal" (Cyrillic a) reads as Latin but is a different string, which is both
+# a classic spoof and a cheap way to fingerprint a document. NFKC does NOT fix these: they
+# are separate scripts with no compatibility decomposition, so they need an explicit map.
+_CONFUSABLES: dict[str, str] = {}
+_CONFUSABLES.update(dict(zip(
+    "АВЕКМНОРСТУХаеорсухіѕј",   # Cyrillic uppercase + lowercase lookalikes
+    "ABEKMHOPCTYXaeopcyxisj",
+)))
+_CONFUSABLES.update(dict(zip(
+    "ΑΒΕΗΙΚΜΝΟΡΤΥΧαοντ",        # Greek lookalikes
+    "ABEHIKMNOPTYXaovt",
+)))
+# Fullwidth Latin/digits (also caught by --nfkc, kept here so --homoglyphs stands alone).
+for _cp in range(0xFF21, 0xFF3B):
+    _CONFUSABLES[chr(_cp)] = chr(_cp - 0xFF21 + ord("A"))
+for _cp in range(0xFF41, 0xFF5B):
+    _CONFUSABLES[chr(_cp)] = chr(_cp - 0xFF41 + ord("a"))
+for _cp in range(0xFF10, 0xFF1A):
+    _CONFUSABLES[chr(_cp)] = chr(_cp - 0xFF10 + ord("0"))
+
+
+def _script(ch: str) -> str:
+    """Coarse script bucket for a letter: latin, cyrillic, greek, or other."""
+    cp = ord(ch)
+    if 0x0400 <= cp <= 0x04FF:
+        return "cyrillic"
+    if 0x0370 <= cp <= 0x03FF:
+        return "greek"
+    if ch.isascii() and ch.isalpha():
+        return "latin"
+    if 0x00C0 <= cp <= 0x024F:  # Latin-1 Supplement + Latin Extended-A/B
+        return "latin"
+    return "other"
+
+
+def fold_confusables(text: str) -> tuple[str, int]:
+    """Map confusable Cyrillic/Greek/fullwidth letters back to ASCII. Returns (text, count)."""
+    out = []
+    n = 0
+    for ch in text:
+        repl = _CONFUSABLES.get(ch)
+        if repl is not None:
+            out.append(repl)
+            n += 1
+        else:
+            out.append(ch)
+    return "".join(out), n
+
+
+def find_confusables(text: str) -> list[tuple[int, str, str, int]]:
+    """[(codepoint, name, ascii_target, count)] for each confusable present."""
+    counts: dict[str, int] = {}
+    for ch in text:
+        if ch in _CONFUSABLES:
+            counts[ch] = counts.get(ch, 0) + 1
+    rows = []
+    for ch, n in sorted(counts.items(), key=lambda kv: ord(kv[0])):
+        try:
+            name = unicodedata.name(ch)
+        except ValueError:
+            name = "<unnamed>"
+        rows.append((ord(ch), name, _CONFUSABLES[ch], n))
+    return rows
+
+
+def mixed_script_words(text: str) -> list[str]:
+    """Words that mix scripts (e.g. Latin + Cyrillic), a strong homoglyph-spoof tell."""
+    flagged = []
+    for word in re.findall(r"\w+", text):
+        scripts = {_script(c) for c in word if c.isalpha()}
+        scripts.discard("other")
+        if len(scripts) > 1:
+            flagged.append(word)
+    return flagged
+
+
+# --------------------------------------------------------------------------- #
 # Layer B: rewrite prompt + divergence scoring
 # --------------------------------------------------------------------------- #
 
@@ -474,12 +555,16 @@ def load_dotenv() -> None:
 def cmd_scrub(args) -> int:
     text = read_input(args.path)
     cleaned, st = clean_text(text, nfkc=args.nfkc)
+    if args.homoglyphs:
+        cleaned, folded = fold_confusables(cleaned)
+        st["folded"] = folded
     out = args.output
     if out is None and args.path not in (None, "-"):
         p = Path(args.path)
         out = str(p.with_suffix(".cleaned" + p.suffix))
     write_output(cleaned, out)
-    eprint(f"removed={st['removed']} replaced={st['replaced']} len {st['in_len']}->{st['out_len']}")
+    tail = f" folded={st['folded']}" if "folded" in st else ""
+    eprint(f"removed={st['removed']} replaced={st['replaced']}{tail} len {st['in_len']}->{st['out_len']}")
     return 0
 
 
@@ -488,12 +573,22 @@ def cmd_inspect(args) -> int:
     rows = inspect_text(text)
     tag_payload = decode_tag_payload(text)
     vs_payload = decode_variation_bytes(text)
-    if not rows:
+    confusables = find_confusables(text)
+    mixed = mixed_script_words(text)
+    if not rows and not confusables and not mixed:
         eprint("clean: no hidden characters found")
         return 0
     for cp, name, n in rows:
         eprint(f"U+{cp:04X}  x{n:<5} {name}")
-    eprint(f"total kinds: {len(rows)}")
+    if rows:
+        eprint(f"total kinds: {len(rows)}")
+    if confusables:
+        eprint("\nhomoglyph confusables (look like ASCII, are not):")
+        for cp, name, ascii_target, n in confusables:
+            eprint(f"U+{cp:04X}  x{n:<5} {name} -> {ascii_target!r}")
+    if mixed:
+        shown = ", ".join(sorted(set(mixed))[:8])
+        eprint(f"\nmixed-script words (homoglyph spoof tell): {shown}")
     # A decoded payload is not just noise: it is a message someone hid in the text.
     if tag_payload:
         eprint(f"\nWARNING: decoded ASCII smuggled in the Unicode Tag block:\n  {tag_payload!r}")
@@ -651,6 +746,13 @@ def cmd_selftest(_args) -> int:
     bits = "".join(chr(0xFE00 + b) if b < 16 else chr(0xE0100 + b - 16) for b in b"hey")
     assert decode_variation_bytes(bits) == "hey"
     assert decode_variation_bytes("ok" + chr(0xFE0F)) == ""
+    # Homoglyphs: Cyrillic lookalikes fold to ASCII, mixed-script word is flagged
+    spoof = "pаypal"  # Cyrillic a inside "paypal"
+    assert fold_confusables(spoof)[0] == "paypal"
+    assert fold_confusables("paypal") == ("paypal", 0)
+    flagged = mixed_script_words(spoof)
+    assert len(flagged) == 1 and fold_confusables(flagged[0])[0] == "paypal"
+    assert mixed_script_words("plain english words") == []
     print("selftest ok")
     return 0
 
@@ -664,6 +766,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("path", nargs="?", default="-")
     s.add_argument("-o", "--output")
     s.add_argument("--nfkc", action="store_true", help="apply NFKC normalization after scrub")
+    s.add_argument("--homoglyphs", action="store_true",
+                   help="fold confusable Cyrillic/Greek/fullwidth letters back to ASCII")
     s.set_defaults(func=cmd_scrub)
 
     i = sub.add_parser("inspect", help="report hidden chars, change nothing")
