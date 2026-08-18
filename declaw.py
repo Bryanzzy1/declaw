@@ -125,6 +125,28 @@ def inspect_text(text: str) -> list[tuple[int, str, int]]:
     return rows
 
 
+# ASCII smuggling: printable ASCII maps 1:1 into the Unicode Tag block, so an attacker can
+# hide a whole instruction (a prompt injection, an exfil command, a fingerprint) in text that
+# looks clean to a human but is fully readable to an LLM. See embracethered.com's ASCII
+# Smuggler and promptfoo's ascii-smuggling plugin. scrub already deletes these chars; decoding
+# them tells you WHAT was hidden, which is the difference between "cleaned it" and "caught it".
+_TAG_BASE = 0xE0000
+
+
+def decode_tag_payload(text: str) -> str:
+    """Reconstruct any ASCII smuggled via the Unicode Tag block (U+E0020..U+E007E).
+
+    Tag space through tag tilde map to ASCII 0x20..0x7E. Non-printable tag chars (the
+    deprecated language tag and cancel tag) are skipped. Returns "" if nothing is hidden.
+    """
+    out = []
+    for ch in text:
+        off = ord(ch) - _TAG_BASE
+        if 0x20 <= off <= 0x7E:
+            out.append(chr(off))
+    return "".join(out)
+
+
 # --------------------------------------------------------------------------- #
 # Layer B: rewrite prompt + divergence scoring
 # --------------------------------------------------------------------------- #
@@ -433,13 +455,18 @@ def cmd_scrub(args) -> int:
 
 
 def cmd_inspect(args) -> int:
-    rows = inspect_text(read_input(args.path))
+    text = read_input(args.path)
+    rows = inspect_text(text)
+    payload = decode_tag_payload(text)
     if not rows:
         eprint("clean: no hidden characters found")
         return 0
     for cp, name, n in rows:
         eprint(f"U+{cp:04X}  x{n:<5} {name}")
     eprint(f"total kinds: {len(rows)}")
+    if payload:
+        # A decoded tag payload is not just noise: it is a message someone hid in the text.
+        eprint(f"\nWARNING: decoded ASCII smuggled in the Unicode Tag block:\n  {payload!r}")
     return 0
 
 
@@ -583,6 +610,11 @@ def cmd_selftest(_args) -> int:
     # non-retryable help names the fix
     assert "key" in _gemini_error_help(403, "x").lower()
     assert "model" in _gemini_error_help(404, "x").lower()
+    # ASCII smuggling: hidden tag-block payload is decoded, and scrub removes it
+    smuggled = "hi" + "".join(chr(_TAG_BASE + ord(c)) for c in "secret")
+    assert decode_tag_payload(smuggled) == "secret"
+    assert clean_text(smuggled)[0] == "hi"
+    assert decode_tag_payload("plain text") == ""
     print("selftest ok")
     return 0
 
