@@ -3,7 +3,10 @@
 
 Two layers, text only:
   Layer A (deterministic)  scrub invisible Unicode (zero-width, variation
-                           selectors, tag chars, bidi, exotic spaces).
+                           selectors, tag chars, bidi, blank glyphs, exotic
+                           spaces); optionally fold homoglyph confusables to
+                           ASCII; and decode any ASCII/bytes smuggled in the Tag
+                           block or variation selectors so you see what was hidden.
   Layer B (statistical)    the token-choice watermark lives in word choice, so
                            it only comes out with a real rewrite. declaw hands
                            you a Gemini rewrite prompt (or calls Gemini if you
