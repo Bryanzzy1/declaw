@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "declaw"
+version = "0.2.0"
+description = "Strip AI provenance from text you own: invisible-Unicode scrub, homoglyph fold, ASCII-smuggling decode, and a peer-model rewrite."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Bryan Zhong" }]
+keywords = ["unicode", "watermark", "steganography", "ascii-smuggling", "text-hygiene"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Text Processing :: Filters",
+    "Topic :: Security",
+]
+dependencies = []  # stdlib only, on purpose
+
+[project.urls]
+Homepage = "https://github.com/Bryanzzy1/declaw"
+
+[project.scripts]
+declaw = "declaw:main"
+
+[tool.setuptools]
+py-modules = ["declaw"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
