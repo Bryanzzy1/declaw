@@ -673,6 +673,7 @@ def cmd_web(args) -> int:
             div = lexical_divergence(cleaned, final)
             clip_set(final)
             eprint(f"scrubbed {st['removed']} hidden chars, Gemini rewrote, divergence={div:.3f}")
+            _warn_dropped_numbers(cleaned, final)
             eprint("clean text is on your clipboard. Paste anywhere.")
             return 0
         clip_set(prompt)
@@ -691,6 +692,7 @@ def cmd_web(args) -> int:
         div = lexical_divergence(original, final)
         eprint(f"divergence from original={div:.3f} " +
                ("(strong scrub)" if div > 0.6 else "(weak, rewrite harder)"))
+        _warn_dropped_numbers(original, final)
     clip_set(final)
     eprint(f"scrubbed {st['removed']} hidden chars. Clean text is on your clipboard.")
     return 0
@@ -706,7 +708,16 @@ def cmd_rewrite(args) -> int:
     div = lexical_divergence(scrubbed, final)
     write_output(final, args.output)
     eprint(f"divergence={div:.3f} " + ("(strong)" if div > 0.6 else "(weak, try --strength humanize)"))
+    _warn_dropped_numbers(scrubbed, final)
     return 0
+
+
+def _warn_dropped_numbers(original: str, rewrite: str) -> None:
+    """Warn if the rewrite changed a number, the one drift a paraphrase must never make."""
+    missing = verify_preservation(original, rewrite)["missing_numbers"]
+    if missing:
+        eprint(f"WARNING: the rewrite dropped or changed numbers: {', '.join(missing)}. "
+               "Check the facts before using it.")
 
 
 def cmd_verify(args) -> int:
