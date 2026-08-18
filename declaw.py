@@ -189,10 +189,12 @@ _CONFUSABLES: dict[str, str] = {}
 _CONFUSABLES.update(dict(zip(
     "АВЕКМНОРСТУХаеорсухіѕј",   # Cyrillic uppercase + lowercase lookalikes
     "ABEKMHOPCTYXaeopcyxisj",
+    strict=True,               # equal length is the invariant; strict catches a typo
 )))
 _CONFUSABLES.update(dict(zip(
     "ΑΒΕΗΙΚΜΝΟΡΤΥΧαοντ",        # Greek lookalikes
     "ABEHIKMNOPTYXaovt",
+    strict=True,
 )))
 # Fullwidth Latin/digits (also caught by --nfkc, kept here so --homoglyphs stands alone).
 for _cp in range(0xFF21, 0xFF3B):
@@ -294,7 +296,7 @@ def _tokens(text: str) -> list[str]:
 
 
 def _bigrams(toks: list[str]) -> set[tuple[str, str]]:
-    return set(zip(toks, toks[1:]))
+    return set(zip(toks, toks[1:], strict=False))
 
 
 def lexical_divergence(original: str, candidate: str) -> float:
@@ -449,22 +451,23 @@ def gemini_rewrite(prompt: str, *, model: str | None = None, retries: int = 3,
                    timeout: float = 60) -> str:
     key = _gemini_key()
     last = ""
-    for model in _model_chain(model):
+    for candidate in _model_chain(model):
         for attempt in range(retries + 1):
             try:
-                return _extract_gemini_text(_gemini_post(prompt, model, key, timeout=timeout))
+                return _extract_gemini_text(_gemini_post(prompt, candidate, key, timeout=timeout))
             except urllib.error.HTTPError as err:
                 code, msg = _http_error_message(err)
-                last = f"{model}: {code} {msg}"
+                last = f"{candidate}: {code} {msg}"
                 if code in RETRYABLE_CODES and attempt < retries:
                     delay = _retry_delay(err, attempt)
-                    eprint(f"gemini {model}: {code} (overloaded), retry {attempt + 1}/{retries} in {delay:.0f}s")
+                    eprint(f"gemini {candidate}: {code} (overloaded), "
+                           f"retry {attempt + 1}/{retries} in {delay:.0f}s")
                     time.sleep(delay)
                     continue
                 if code in RETRYABLE_CODES:
-                    eprint(f"gemini {model}: {code} after {retries} retries, trying next model")
+                    eprint(f"gemini {candidate}: {code} after {retries} retries, trying next model")
                     break  # move on to the next model in the chain
-                raise SystemExit(_gemini_error_help(code, msg))
+                raise SystemExit(_gemini_error_help(code, msg)) from None
     raise SystemExit(
         f"error: every Gemini model is overloaded right now ({last}).\n"
         "Try again later, or run `declaw prompt` and paste into the Gemini web app."
@@ -518,7 +521,7 @@ def clip_get() -> str:
         )
         return r.stdout or ""
     except FileNotFoundError:
-        raise SystemExit("error: clipboard needs PowerShell (Windows). Use file mode instead.")
+        raise SystemExit("error: clipboard needs PowerShell (Windows). Use file mode instead.") from None
 
 
 def clip_set(text: str) -> None:
@@ -645,7 +648,7 @@ def cmd_score(args) -> int:
     original = Path(args.original).read_text(encoding="utf-8")
     cands = [Path(p).read_text(encoding="utf-8") for p in args.candidates]
     best, scores = select_candidate(original, cands)
-    for i, (p, s) in enumerate(zip(args.candidates, scores)):
+    for i, (p, s) in enumerate(zip(args.candidates, scores, strict=True)):
         mark = " <- best" if i == best else ""
         eprint(f"{p}: divergence={s:.3f}{mark}")
     if args.output:
@@ -797,7 +800,7 @@ def cmd_selftest(_args) -> int:
     for raw in ('{"promptFeedback":{"blockReason":"SAFETY"}}', '{"candidates":[]}'):
         try:
             _extract_gemini_text(raw)
-            assert False, "expected SystemExit"
+            raise AssertionError("expected SystemExit")
         except SystemExit:
             pass
     # non-retryable help names the fix

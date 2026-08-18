@@ -78,7 +78,7 @@ def test_decode_tag_payload():
 
 
 def test_decode_variation_bytes():
-    carrier = "clean" + _vs_encode("payload".encode())
+    carrier = "clean" + _vs_encode(b"payload")
     assert decode_variation_bytes(carrier) == "payload"
     # a lone emoji presentation selector is not a payload
     assert decode_variation_bytes("thumbs" + chr(0xFE0F)) == ""
