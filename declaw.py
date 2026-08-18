@@ -574,8 +574,24 @@ def cmd_inspect(args) -> int:
     tag_payload = decode_tag_payload(text)
     vs_payload = decode_variation_bytes(text)
     confusables = find_confusables(text)
-    mixed = mixed_script_words(text)
-    if not rows and not confusables and not mixed:
+    mixed = sorted(set(mixed_script_words(text)))
+    clean = not (rows or confusables or mixed or tag_payload or vs_payload)
+
+    if args.json:
+        report = {
+            "clean": clean,
+            "hidden": [{"codepoint": f"U+{cp:04X}", "name": name, "count": n}
+                       for cp, name, n in rows],
+            "confusables": [{"codepoint": f"U+{cp:04X}", "name": name, "ascii": a, "count": n}
+                            for cp, name, a, n in confusables],
+            "mixed_script_words": mixed,
+            "tag_payload": tag_payload or None,
+            "variation_selector_payload": vs_payload or None,
+        }
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 1 if (args.check and not clean) else 0
+
+    if clean:
         eprint("clean: no hidden characters found")
         return 0
     for cp, name, n in rows:
@@ -587,14 +603,13 @@ def cmd_inspect(args) -> int:
         for cp, name, ascii_target, n in confusables:
             eprint(f"U+{cp:04X}  x{n:<5} {name} -> {ascii_target!r}")
     if mixed:
-        shown = ", ".join(sorted(set(mixed))[:8])
-        eprint(f"\nmixed-script words (homoglyph spoof tell): {shown}")
+        eprint(f"\nmixed-script words (homoglyph spoof tell): {', '.join(mixed[:8])}")
     # A decoded payload is not just noise: it is a message someone hid in the text.
     if tag_payload:
         eprint(f"\nWARNING: decoded ASCII smuggled in the Unicode Tag block:\n  {tag_payload!r}")
     if vs_payload:
         eprint(f"\nWARNING: decoded bytes smuggled in variation selectors:\n  {vs_payload!r}")
-    return 0
+    return 1 if args.check else 0
 
 
 def cmd_prompt(args) -> int:
@@ -772,6 +787,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     i = sub.add_parser("inspect", help="report hidden chars, change nothing")
     i.add_argument("path", nargs="?", default="-")
+    i.add_argument("--json", action="store_true", help="emit a machine-readable JSON report")
+    i.add_argument("--check", action="store_true",
+                   help="exit 1 if anything hidden is found (gate documents in CI)")
     i.set_defaults(func=cmd_inspect)
 
     pr = sub.add_parser("prompt", help="emit the Gemini rewrite prompt")
@@ -810,6 +828,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    # Text tools emit non-ASCII (accents, decoded payloads, other scripts). A Windows
+    # console defaults to cp1252 and crashes on those, so force UTF-8 on our streams.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):  # already wrapped, or not a real stream
+            pass
     load_dotenv()
     args = build_parser().parse_args(argv)
     return args.func(args)
