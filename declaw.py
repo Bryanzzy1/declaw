@@ -16,6 +16,7 @@ Subcommands:
   prompt    emit the Gemini rewrite prompt around your text
   rewrite   headless Layer B: scrub + Gemini rewrite a file/stdin
   score     rank rewrite candidates by lexical divergence, pick the best
+  verify    check a rewrite kept the original's numbers and names
   web       clipboard loop for the browser (claude.ai -> Gemini -> clean)
   doctor    check the Gemini key and which models are available
   selftest  run built-in asserts
@@ -312,6 +313,29 @@ def lexical_divergence(original: str, candidate: str) -> float:
     if not union:
         return 0.0
     return 1.0 - len(ba & bb) / len(union)
+
+
+_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
+_NAME_RE = re.compile(r"\b[A-Z][A-Za-z0-9_.-]*[A-Za-z0-9]\b")
+
+
+def extract_facts(text: str) -> tuple[set[str], set[str]]:
+    """(numbers, names) a rewrite must preserve. Numbers are exact tokens; names are
+    capitalized words and identifiers. Used to catch a paraphrase that drifts a fact."""
+    numbers = set(_NUMBER_RE.findall(text))
+    names = set(_NAME_RE.findall(text))
+    return numbers, names
+
+
+def verify_preservation(original: str, rewrite: str) -> dict[str, list[str]]:
+    """What the rewrite dropped or changed. Missing numbers are hard errors (a fact
+    changed); missing names are advisory (a paraphrase may reword one legitimately)."""
+    onum, oname = extract_facts(original)
+    rnum, rname = extract_facts(rewrite)
+    return {
+        "missing_numbers": sorted(onum - rnum),
+        "missing_names": sorted(oname - rname),
+    }
 
 
 def select_candidate(original: str, candidates: list[str]) -> tuple[int, list[float]]:
@@ -685,6 +709,22 @@ def cmd_rewrite(args) -> int:
     return 0
 
 
+def cmd_verify(args) -> int:
+    """Check that a rewrite kept the original's facts. A paraphrase (Layer B) can quietly
+    change a number or drop a name; this catches that before you ship the rewrite."""
+    original = Path(args.original).read_text(encoding="utf-8")
+    rewrite = Path(args.rewrite).read_text(encoding="utf-8")
+    d = verify_preservation(original, rewrite)
+    if d["missing_numbers"]:
+        eprint(f"MISSING numbers (facts changed): {', '.join(d['missing_numbers'])}")
+    if d["missing_names"]:
+        eprint(f"missing names (advisory, may be reworded): {', '.join(d['missing_names'][:12])}")
+    if not d["missing_numbers"] and not d["missing_names"]:
+        eprint("ok: every number and name from the original survives the rewrite")
+    # Only a changed number is a hard failure; names can shift under a legitimate paraphrase.
+    return 1 if d["missing_numbers"] else 0
+
+
 def cmd_doctor(_args) -> int:
     """Diagnose the Gemini backend: is the key set, valid, and is a usable model
     available. Separates 'bad key' from 'model overloaded' so you stop guessing."""
@@ -768,6 +808,12 @@ def cmd_selftest(_args) -> int:
     flagged = mixed_script_words(spoof)
     assert len(flagged) == 1 and fold_confusables(flagged[0])[0] == "paypal"
     assert mixed_script_words("plain english words") == []
+    # Fact verify: a dropped number is caught, a reworded sentence that keeps facts passes
+    orig = "We cut latency 12x to 207 us for Acme."
+    good = "Acme saw latency fall 12x, down to 207 us."
+    bad = "We cut latency 10x to 210 us."
+    assert verify_preservation(orig, good)["missing_numbers"] == []
+    assert set(verify_preservation(orig, bad)["missing_numbers"]) == {"12", "207"}
     print("selftest ok")
     return 0
 
@@ -821,6 +867,11 @@ def build_parser() -> argparse.ArgumentParser:
     rw.add_argument("--retries", type=int, default=3, help="retries per model on overload (default 3)")
     rw.add_argument("--timeout", type=float, default=60, help="per-request timeout seconds (default 60)")
     rw.set_defaults(func=cmd_rewrite)
+
+    vf = sub.add_parser("verify", help="check a rewrite kept the original's numbers and names")
+    vf.add_argument("original")
+    vf.add_argument("rewrite")
+    vf.set_defaults(func=cmd_verify)
 
     sub.add_parser("doctor", help="check the Gemini key and model availability").set_defaults(func=cmd_doctor)
     sub.add_parser("selftest", help="run built-in asserts").set_defaults(func=cmd_selftest)
