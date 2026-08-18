@@ -53,6 +53,11 @@ _REMOVE |= set(range(0x2066, 0x206A))          # bidi isolates
 _REMOVE |= set(range(0xFE00, 0xFE10))          # variation selectors
 _REMOVE |= set(range(0xE0100, 0xE01F0))        # variation selectors supplement
 _REMOVE |= set(range(0xE0000, 0xE0080))        # Unicode tag chars (hidden payloads)
+# Blank/zero-width glyphs the Unicode-category pass below misses, because their
+# category is So or Lo, not Cf/Cc/Zs. Steganography favors exactly these: they render
+# as nothing yet survive a naive "strip the format chars" cleaner.
+_REMOVE |= {0x2800}                            # braille pattern blank (renders empty, So)
+_REMOVE |= {0x115F, 0x1160, 0x3164, 0xFFA0}    # Hangul fillers (zero-width, Lo)
 
 _KEEP_CONTROLS = {"\n", "\r", "\t"}
 
