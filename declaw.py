@@ -147,6 +147,35 @@ def decode_tag_payload(text: str) -> str:
     return "".join(out)
 
 
+def _vs_byte(cp: int) -> int | None:
+    """The byte a variation selector encodes under the Sneaky Bits scheme, or None."""
+    if 0xFE00 <= cp <= 0xFE0F:
+        return cp - 0xFE00              # VS1..VS16  -> bytes 0..15
+    if 0xE0100 <= cp <= 0xE01EF:
+        return cp - 0xE0100 + 16        # VS17..VS256 -> bytes 16..255
+    return None
+
+
+def decode_variation_bytes(text: str) -> str:
+    """Reconstruct arbitrary bytes smuggled in variation selectors (Sneaky Bits).
+
+    Any byte can be encoded as a variation selector, so a run of them carries a hidden
+    payload of any content, not just ASCII. See embracethered.com's Sneaky Bits. Variation
+    selectors also legitimately follow emoji, so this returns "" unless the decoded bytes
+    form at least three printable characters, which keeps a lone emoji selector from looking
+    like a payload.
+    """
+    raw = bytes(b for b in (_vs_byte(ord(ch)) for ch in text) if b is not None)
+    if not raw:
+        return ""
+    try:
+        msg = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return ""
+    printable = sum(ch.isprintable() for ch in msg)
+    return msg if printable >= 3 else ""
+
+
 # --------------------------------------------------------------------------- #
 # Layer B: rewrite prompt + divergence scoring
 # --------------------------------------------------------------------------- #
@@ -457,16 +486,19 @@ def cmd_scrub(args) -> int:
 def cmd_inspect(args) -> int:
     text = read_input(args.path)
     rows = inspect_text(text)
-    payload = decode_tag_payload(text)
+    tag_payload = decode_tag_payload(text)
+    vs_payload = decode_variation_bytes(text)
     if not rows:
         eprint("clean: no hidden characters found")
         return 0
     for cp, name, n in rows:
         eprint(f"U+{cp:04X}  x{n:<5} {name}")
     eprint(f"total kinds: {len(rows)}")
-    if payload:
-        # A decoded tag payload is not just noise: it is a message someone hid in the text.
-        eprint(f"\nWARNING: decoded ASCII smuggled in the Unicode Tag block:\n  {payload!r}")
+    # A decoded payload is not just noise: it is a message someone hid in the text.
+    if tag_payload:
+        eprint(f"\nWARNING: decoded ASCII smuggled in the Unicode Tag block:\n  {tag_payload!r}")
+    if vs_payload:
+        eprint(f"\nWARNING: decoded bytes smuggled in variation selectors:\n  {vs_payload!r}")
     return 0
 
 
@@ -615,6 +647,10 @@ def cmd_selftest(_args) -> int:
     assert decode_tag_payload(smuggled) == "secret"
     assert clean_text(smuggled)[0] == "hi"
     assert decode_tag_payload("plain text") == ""
+    # Sneaky Bits: bytes smuggled in variation selectors decode back, emoji selector does not
+    bits = "".join(chr(0xFE00 + b) if b < 16 else chr(0xE0100 + b - 16) for b in b"hey")
+    assert decode_variation_bytes(bits) == "hey"
+    assert decode_variation_bytes("ok" + chr(0xFE0F)) == ""
     print("selftest ok")
     return 0
 
